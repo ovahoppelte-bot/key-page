@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dein Key</title>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <style>
+        body {
+            background: #0a0a0f;
+            color: #fff;
+            font-family: 'Segoe UI', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .key-box {
+            background: rgba(22, 27, 34, 0.8);
+            backdrop-filter: blur(15px);
+            border-radius: 1.5rem;
+            padding: 2.5rem;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            max-width: 400px;
+            width: 100%;
+        }
+        .key {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #4f8cff;
+            letter-spacing: 2px;
+            margin: 1rem 0;
+            word-break: break-all;
+        }
+        button {
+            background: #4f8cff;
+            border: none;
+            padding: 0.8rem 2rem;
+            border-radius: 2rem;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+        .hint {
+            color: #8892b0;
+            margin-top: 0.5rem;
+        }
+        .countdown {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #00e676;
+            margin: 1rem 0;
+        }
+        .countdown.warning {
+            color: #ffaa00;
+        }
+        .countdown.expired {
+            color: #ff5252;
+        }
+    </style>
+</head>
+<body>
+<div class="key-box">
+    <h2>🔐 Dein persönlicher Key</h2>
+    <p>Kopiere diesen Key und füge ihn im Loader ein.</p>
+    <div class="key" id="keyDisplay">Wird generiert...</div>
+    <div class="countdown" id="countdownDisplay"></div>
+    <button onclick="copyKey()">📋 Kopieren</button>
+    <p class="hint" id="expiryHint"></p>
+    <p class="hint">Dieser Key kann nur einmal verwendet werden.</p>
+</div>
+
+<script>
+    const firebaseConfig = {
+        apiKey: "AIzaSyA2yZrqwsAwWrep94h4_DeyOfhIwmTgHOw",
+        authDomain: "key-generator-a3ab9.firebaseapp.com",
+        databaseURL: "https://key-generator-a3ab9-default-rtdb.europe-west1.firebasedatabase.app",
+        projectId: "key-generator-a3ab9",
+        storageBucket: "key-generator-a3ab9.firebasestorage.app",
+        messagingSenderId: "257270057879",
+        appId: "1:257270057879:web:07049e4d5189c0e93492d2"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // Prüfen, ob bereits ein Key in der URL übergeben wurde (z.B. ?key=ABC)
+    const urlParams = new URLSearchParams(window.location.search);
+    const existingKey = urlParams.get('key');
+
+    let countdownInterval = null;
+
+    function updateCountdown(expiryTime) {
+        const countdownEl = document.getElementById('countdownDisplay');
+        if (!expiryTime) {
+            countdownEl.textContent = '';
+            return;
+        }
+
+        function tick() {
+            const now = new Date().getTime();
+            const distance = expiryTime - now;
+
+            if (distance <= 0) {
+                countdownEl.textContent = 'Abgelaufen';
+                countdownEl.className = 'countdown expired';
+                clearInterval(countdownInterval);
+                return;
+            }
+
+            const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+            let text = '';
+            if (days > 0) text += days + 'd ';
+            if (hours > 0) text += hours + 'h ';
+            if (minutes > 0) text += minutes + 'm ';
+            text += seconds + 's';
+
+            countdownEl.textContent = '⏳ ' + text;
+
+            // Warnung bei weniger als 1 Stunde
+            if (distance < 3600000) {
+                countdownEl.className = 'countdown warning';
+            }
+        }
+
+        tick();
+        countdownInterval = setInterval(tick, 1000);
+    }
+
+    async function loadExistingKey(key) {
+        try {
+            const snap = await db.ref('keys/' + key).once('value');
+            const data = snap.val();
+            if (data && data.active && data.expiry) {
+                const expiryTime = new Date(data.expiry).getTime();
+                document.getElementById('keyDisplay').textContent = key;
+                document.getElementById('expiryHint').textContent =
+                    'Gültig bis: ' + new Date(data.expiry).toLocaleString();
+                updateCountdown(expiryTime);
+                window.generatedKey = key;
+            } else {
+                document.getElementById('keyDisplay').textContent = 'Key ungültig oder abgelaufen.';
+            }
+        } catch (e) {
+            document.getElementById('keyDisplay').textContent = 'Fehler beim Laden.';
+        }
+    }
+
+    async function generateNewKey() {
+        const key = 'K-' + Math.random().toString(36).substring(2, 14).toUpperCase();
+        const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 24h
+        try {
+            await db.ref('keys/' + key).set({
+                key: key,
+                expiry: expiry,
+                active: true,
+                hwid: "",
+                created: new Date().toISOString()
+            });
+
+            // URL aktualisieren, damit bei Reload der gleiche Key bleibt
+            window.history.replaceState({}, '', '?key=' + key);
+
+            document.getElementById('keyDisplay').textContent = key;
+            document.getElementById('expiryHint').textContent =
+                'Gültig bis: ' + new Date(expiry).toLocaleString();
+            window.generatedKey = key;
+
+            const expiryTime = new Date(expiry).getTime();
+            updateCountdown(expiryTime);
+        } catch (e) {
+            document.getElementById('keyDisplay').textContent = 'Fehler: ' + e.message;
+        }
+    }
+
+    function copyKey() {
+        if (window.generatedKey) {
+            navigator.clipboard.writeText(window.generatedKey).then(() => {
+                alert('Key kopiert!');
+            });
+        }
+    }
+
+    // Entscheide, ob ein vorhandener Key geladen oder ein neuer generiert wird
+    if (existingKey) {
+        loadExistingKey(existingKey);
+    } else {
+        generateNewKey();
+    }
+</script>
+</body>
+</html>
